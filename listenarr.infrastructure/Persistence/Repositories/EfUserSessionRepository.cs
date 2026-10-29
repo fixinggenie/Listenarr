@@ -21,6 +21,8 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 {
     public class EfUserSessionRepository : IUserSessionRepository
     {
+        internal static readonly TimeSpan LastAccessedResolution = TimeSpan.FromMinutes(5);
+
         private readonly ListenArrDbContext _db;
 
         public EfUserSessionRepository(ListenArrDbContext db)
@@ -47,8 +49,14 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 return null;
             }
 
-            session.LastAccessed = DateTime.UtcNow;
-            await _db.SaveChangesAsync(ct);
+            // Every API call and hub connection authenticates through here, so writing on each
+            // one turns page loads into bursts of SQLite writes. Minutes are precise enough.
+            var now = DateTime.UtcNow;
+            if (now - session.LastAccessed >= LastAccessedResolution)
+            {
+                session.LastAccessed = now;
+                await _db.SaveChangesAsync(ct);
+            }
             return session;
         }
 

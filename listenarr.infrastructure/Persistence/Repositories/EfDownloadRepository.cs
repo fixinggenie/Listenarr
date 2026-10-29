@@ -49,6 +49,9 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         public async Task UpdateAsync(Download download)
         {
             ApplyActiveDeduplicationKey(download);
+            // The monitor re-saves every active download on each poll, including imported ones
+            // still seeding. Skip the write (and its write lock) when nothing actually changed.
+            if (await IsUnchangedAsync(download)) return;
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             await using var transaction = ctx.Database.IsRelational()
                 ? await ctx.Database.BeginTransactionAsync() : null;
@@ -63,6 +66,15 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             ctx.Downloads.Update(download);
             await ctx.SaveChangesAsync();
             if (transaction != null) await transaction.CommitAsync();
+        }
+
+        private async Task<bool> IsUnchangedAsync(Download download)
+        {
+            await using var ctx = await _dbFactory.CreateDbContextAsync();
+            var existing = await ctx.Downloads.SingleOrDefaultAsync(d => d.Id == download.Id);
+            if (existing == null) return false;
+            ctx.Entry(existing).CurrentValues.SetValues(download);
+            return !ctx.ChangeTracker.HasChanges();
         }
 
         public async Task UpdateMetadataAsync(string id, string key, object? value)

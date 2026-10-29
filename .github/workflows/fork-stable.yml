@@ -1,0 +1,77 @@
+# fixinggenie fork: build our `stable` branch (upstream canary + local fixes) into
+# ghcr.io/fixinggenie/listenarr:stable. Weekly, merge upstream canary first; a merge
+# conflict fails the run instead of publishing, so the running image never changes silently.
+name: Fork stable image
+
+on:
+  push:
+    branches: [ stable ]
+  schedule:
+    - cron: '0 9 * * 1'   # Mondays 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: fork-stable
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'fixinggenie/Listenarr'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stable
+          fetch-depth: 0
+
+      - name: Merge upstream canary
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/Listenarrs/Listenarr.git
+          git fetch upstream canary
+          if git merge-base --is-ancestor upstream/canary HEAD; then
+            echo "Already up to date with upstream."
+          else
+            git merge --no-edit upstream/canary
+          fi
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Backend tests
+        run: dotnet test tests/Listenarr.Tests.csproj -c Release
+
+      - name: Push merged branch
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: git push origin HEAD:stable
+
+      - name: Commit being built
+        id: head
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/fixinggenie/listenarr:stable
+            ghcr.io/fixinggenie/listenarr:stable-${{ steps.head.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

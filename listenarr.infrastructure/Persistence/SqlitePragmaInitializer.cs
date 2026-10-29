@@ -24,18 +24,28 @@ namespace Listenarr.Infrastructure.Persistence
     {
         public static void ApplyPragmas(DbContext context)
         {
-            var conn = context.Database.GetDbConnection();
-            if (conn is SqliteConnection sqliteConn)
-            {
-                if (sqliteConn.State != System.Data.ConnectionState.Open)
-                {
-                    sqliteConn.Open();
-                }
+            Execute(context, @"PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA journal_size_limit=6144000;");
+        }
 
-                using var cmd = sqliteConn.CreateCommand();
-                cmd.CommandText = @"PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA journal_size_limit=6144000;";
-                cmd.ExecuteNonQuery();
+        /// <summary>The database's journal mode ("wal" once <see cref="ApplyPragmas"/> has run), or null off SQLite.</summary>
+        public static string? ReadJournalMode(DbContext context) =>
+            Execute(context, "PRAGMA journal_mode;")?.ToString();
+
+        private static object? Execute(DbContext context, string sql)
+        {
+            if (context.Database.GetDbConnection() is not SqliteConnection connection)
+            {
+                return null;
             }
+
+            if (connection.State != System.Data.ConnectionState.Open)
+            {
+                connection.Open();
+            }
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = sql;
+            return cmd.ExecuteScalar();
         }
     }
 }

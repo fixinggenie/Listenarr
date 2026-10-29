@@ -81,6 +81,12 @@ public static class InfrastructureStartupCompositionExtensions
                     repairedPostMigrationData.MoveJobsRepaired);
             }
             Log.Logger.Information("[Startup] EF Core migrations applied successfully");
+
+            // WAL is persistent in the database file. Without it SQLite runs in rollback-journal
+            // mode, where any write blocks every reader, so background polling stalls page loads.
+            SqlitePragmaInitializer.ApplyPragmas(ctx);
+            Log.Logger.Information("[Startup] SQLite journal mode: {JournalMode}",
+                SqlitePragmaInitializer.ReadJournalMode(ctx) ?? "n/a");
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
